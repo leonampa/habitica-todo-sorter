@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Habitica Standalone To-Do Sorter</title>
+    <!-- Load Tailwind CSS for modern, responsive styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+        }
+        #taskList {
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .task-item {
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            transition: background-color 0.15s ease-in-out;
+            padding: 1rem;
+        }
+        .task-item:nth-child(even) {
+            background-color: #f0fdf4;
+        }
+        .task-item:hover {
+            background-color: #e6ffed;
+        }
+        .drag-handle {
+            margin-right: 1rem;
+            cursor: grab;
+            color: #9ca3af;
+            line-height: 0;
+        }
+        .dragging {
+            opacity: 0.5;
+            border: 2px dashed #34d399;
+            background-color: #ecfdf5 !important;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        .drag-over {
+            border-bottom: 3px solid #10b981;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+    
+    <div id="appContainer" class="max-w-3xl mx-auto bg-white p-6 sm:p-8 rounded-xl shadow-2xl">
+        
+        <!-- API Setup Panel (Visible if keys are missing) -->
+        <div id="setupOverlay" class="hidden bg-blue-50 p-6 rounded-lg mb-8 border border-blue-200">
+            <h2 class="text-sm font-bold uppercase tracking-wide text-blue-600 mb-4">API Configuration</h2>
+            <p class="text-xs text-blue-500 mb-4">Credentials are saved in your browser's Local Storage. They are never sent to a backend server.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                <input type="text" id="uidInput" placeholder="Habitica User ID" class="p-3 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 outline-none">
+                <input type="password" id="tokenInput" placeholder="Habitica API Token" class="p-3 border rounded-lg text-sm focus:ring-2 focus:ring-blue-400 outline-none">
+            </div>
+            <button onclick="saveAndLock()" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">Save Credentials</button>
+        </div>
+
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold">Habitica Standalone To-Do Sorter</h1>
+            <div class="flex justify-center items-center gap-2 mt-1">
+                <p id="statusMessage" class="text-sm text-gray-500">Ready to fetch tasks.</p>
+                <button onclick="clearKeys()" id="clearKeyBtn" class="hidden text-[10px] bg-gray-200 px-2 py-0.5 rounded text-gray-600 hover:bg-red-100 hover:text-red-600 uppercase font-bold">Wipe Keys</button>
+            </div>
+        </header>
+
+        <div class="flex space-x-4 mb-8">
+            <button id="fetchButton" onclick="fetchAndDisplayTodos()"
+                    class="w-full py-3 px-6 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-[1.01] active:scale-100 disabled:opacity-50">
+                Fetch and Sort Tasks
+            </button>
+            <button id="saveButton" onclick="saveTaskToHabitica()" disabled 
+                    class="w-full py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-[1.01] active:scale-100 disabled:opacity-50">
+                Save as New To-Do
+            </button>
+        </div>
+
+        <div id="loadingIndicator" class="text-center hidden">
+            <div class="flex items-center justify-center space-x-2">
+                <div class="w-4 h-4 bg-green-600 rounded-full animate-bounce"></div>
+                <div class="w-4 h-4 bg-green-600 rounded-full animate-bounce delay-150"></div>
+                <div class="w-4 h-4 bg-green-600 rounded-full animate-bounce delay-300"></div>
+                <span class="text-gray-600 ml-3">Fetching data...</span>
+            </div>
+        </div>
+        
+        <div id="saveSuccess" class="hidden mt-4 p-4 bg-blue-100 text-blue-700 rounded-lg">
+            <p class="font-semibold">Success:</p>
+            <p>The sorted list has been saved as a new To-Do task in Habitica!</p>
+        </div>
+
+        <div id="outputContainer" class="hidden">
+            <div class="bg-blue-50 p-4 rounded-lg mb-6 border-l-4 border-blue-400">
+                <p id="dateHeader" class="text-lg font-extrabold text-blue-700"></p>
+                <p class="text-sm text-blue-600 mt-1">
+                    <span id="dateNote"></span>
+                </p>
+            </div>
+
+            <div id="taskList" class="rounded-lg border border-gray-200 divide-y divide-gray-200"></div>
+        </div>
+        
+        <div id="errorDisplay" class="hidden mt-4 p-4 bg-red-100 text-red-700 rounded-lg">
+            <p class="font-semibold">Error:</p>
+            <p id="errorMessage"></p>
+        </div>
+    </div>
+
+    <script>
+        // --- SECURE INJECTION LOGIC ---
+        let USER_ID = localStorage.getItem('habitica_uid') || "";
+        let API_TOKEN = localStorage.getItem('habitica_token') || "";
+        const HABITICA_API_URL = "https://habitica.com/api/v3/tasks/user";
+        
+        const EXCLUDED_PREFIX = "Sorted To-Dos for";
+        const EXCLUDED_CHARS = ['%', '&', '$', '/'];
+        const SPECIAL_DATE_TASK = "!^!";
+
+        const GREEK_DAYS = { 0: 'Δευ', 1: 'Τρι', 2: 'Τετ', 3: 'Πεμ', 4: 'Παρ', 5: 'Σαβ', 6: 'Κυρ' };
+        const GREEK_MONTHS = { 1: 'Ιαν', 2: 'Φεβ', 3: 'Μαρ', 4: 'Απρ', 5: 'Μαϊ', 6: 'Ιου', 7: 'Ιου', 8: 'Αυγ', 9: 'Σεπ', 10: 'Οκτ', 11: 'Νοε', 12: 'Δεκ' };
+
+        window.onload = () => {
+            if (!USER_ID || !API_TOKEN) {
+                document.getElementById('setupOverlay').classList.remove('hidden');
+            } else {
+                document.getElementById('clearKeyBtn').classList.remove('hidden');
+            }
+        };
+
+        function saveAndLock() {
+            const uid = document.getElementById('uidInput').value.trim();
+            const token = document.getElementById('tokenInput').value.trim();
+            
+            if (uid && token) {
+                localStorage.setItem('habitica_uid', uid);
+                localStorage.setItem('habitica_token', token);
+                USER_ID = uid;
+                API_TOKEN = token;
+                document.getElementById('setupOverlay').classList.add('hidden');
+                document.getElementById('clearKeyBtn').classList.remove('hidden');
+                statusMessage.textContent = "Credentials secured locally. Ready!";
+            }
+        }
+
+        function clearKeys() {
+            if (confirm("Wipe saved API keys from browser memory?")) {
+                localStorage.removeItem('habitica_uid');
+                localStorage.removeItem('habitica_token');
+                location.reload();
+            }
+        }
+
+        // --- CORE LOGIC (UNTOUCHED FROM ORIGINAL) ---
+        let lastGeneratedTaskText = ""; 
+        let lastDateShort = "";
+        let dragSrcEl = null;
+        
+        const fetchButton = document.getElementById('fetchButton');
+        const saveButton = document.getElementById('saveButton');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const outputContainer = document.getElementById('outputContainer');
+        const taskListContainer = document.getElementById('taskList');
+        const dateHeader = document.getElementById('dateHeader');
+        const dateNote = document.getElementById('dateNote');
+        const errorDisplay = document.getElementById('errorDisplay');
+        const errorMessage = document.getElementById('errorMessage');
+        const statusMessage = document.getElementById('statusMessage');
+        const saveSuccess = document.getElementById('saveSuccess');
+
+        function countLeadingExclamations(text) {
+            let count = 0;
+            for (let i = 0; i < text.length; i++) {
+                if (text[i] === '!') { count++; } else { break; }
+            }
+            return count;
+        }
+        
+        function getDateData(skipConfig) {
+            const today = new Date();
+            let finalDate = new Date(today);
+            let note;
+
+            if (typeof skipConfig === 'number' && skipConfig > 0) {
+                finalDate.setDate(today.getDate() + skipConfig);
+                note = skipConfig === 1 ? "Note: Date is set for tomorrow." : `Note: Date was set to ${skipConfig} days forward.`;
+            } else if (skipConfig === 'Monday') {
+                const currentWeekday = today.getDay();
+                let daysAhead = (1 - currentWeekday + 7) % 7;
+                if (daysAhead === 0) daysAhead = 7;
+                finalDate.setDate(today.getDate() + daysAhead);
+                note = "Note: Date was set to Monday.";
+            } else {
+                finalDate.setDate(today.getDate() + 1); 
+                note = "Note: Date is set for tomorrow (default).";
+            }
+
+            const dayOfWeek = finalDate.getDay();
+            const dayAbbr = GREEK_DAYS[dayOfWeek === 0 ? 6 : dayOfWeek - 1];
+            const monthAbbr = GREEK_MONTHS[finalDate.getMonth() + 1];
+            const dayNum = finalDate.getDate();
+            const fullDateStr = `${dayAbbr} ${dayNum} ${monthAbbr}`;
+            
+            return { header: `Για αυριο ${fullDateStr}`, shortDate: fullDateStr, note: note };
+        }
+
+        function regenerateTaskTextFromDOM() {
+            const outputLines = [dateHeader.textContent, ""];
+            const taskItems = taskListContainer.querySelectorAll('.task-item');
+            taskItems.forEach(item => {
+                const taskTextP = item.querySelector('p');
+                if (taskTextP) { outputLines.push(taskTextP.textContent.trim()); }
+            });
+            lastGeneratedTaskText = outputLines.join("\n").trim();
+            statusMessage.textContent = "Reordered! Click Save.";
+        }
+
+        function handleDragStart(e) { dragSrcEl = this; e.dataTransfer.effectAllowed = 'move'; this.classList.add('dragging'); }
+        function handleDragOver(e) { e.preventDefault(); if (dragSrcEl !== this) { this.classList.add('drag-over'); } }
+        function handleDragLeave() { this.classList.remove('drag-over'); }
+        function handleDrop(e) {
+            e.stopPropagation();
+            this.classList.remove('drag-over');
+            if (dragSrcEl !== this && dragSrcEl) {
+                const parent = this.parentNode;
+                const dropIndex = Array.from(parent.children).indexOf(this);
+                const dragIndex = Array.from(parent.children).indexOf(dragSrcEl);
+                if (dragIndex < dropIndex) { parent.insertBefore(dragSrcEl, this.nextSibling); } 
+                else { parent.insertBefore(dragSrcEl, this); }
+                regenerateTaskTextFromDOM();
+            }
+        }
+        function handleDragEnd() { this.classList.remove('dragging'); Array.from(taskListContainer.children).forEach(i => i.classList.remove('drag-over')); }
+
+        async function fetchAndDisplayTodos() {
+            if (!USER_ID || !API_TOKEN) {
+                showError("Configuration missing. Please enter your API keys above.");
+                return;
+            }
+
+            taskListContainer.innerHTML = '';
+            outputContainer.classList.add('hidden');
+            errorDisplay.classList.add('hidden');
+            saveSuccess.classList.add('hidden');
+            fetchButton.disabled = true;
+            saveButton.disabled = true;
+            loadingIndicator.classList.remove('hidden');
+            statusMessage.textContent = "Fetching from Habitica...";
+
+            const headers = { "x-api-user": USER_ID, "x-api-key": API_TOKEN, "x-client": `${USER_ID}-Sorter` };
+
+            try {
+                const response = await fetch(HABITICA_API_URL, { headers });
+                const result = await response.json();
+                
+                if (!response.ok || !result.success) throw new Error(result.message || "API Error");
+
+                const todos = result.data.filter(task => task.type === 'todo');
+                let skipConfig = 1;
+                let mondayOverrideFound = false;
+                let filteredTodos = [];
+
+                for (const todo of todos) {
+                    const taskText = todo.text.trim();
+                    if (taskText.startsWith(SPECIAL_DATE_TASK)) {
+                        const remainingText = taskText.substring(SPECIAL_DATE_TASK.length).trim();
+                        const numberMatch = remainingText.match(/^(\d+)/);
+                        if (numberMatch) { skipConfig = Math.max(skipConfig, parseInt(numberMatch[1], 10)); } 
+                        else { mondayOverrideFound = true; }
+                        continue; 
+                    } 
+                    if (taskText.startsWith(EXCLUDED_PREFIX) || (taskText && EXCLUDED_CHARS.includes(taskText[0]))) continue;
+                    if (taskText) filteredTodos.push(todo);
+                }
+                
+                if (mondayOverrideFound && skipConfig === 1) skipConfig = 'Monday';
+
+                filteredTodos.sort((a, b) => {
+                    const aText = a.text.trim();
+                    const bText = b.text.trim();
+                    const aExc = countLeadingExclamations(aText);
+                    const bExc = countLeadingExclamations(bText);
+                    if (aExc !== bExc) return bExc - aExc;
+                    return bText.length - aText.length;
+                });
+                
+                const dateData = getDateData(skipConfig);
+                const outputLines = [dateData.header, ""];
+                filteredTodos.forEach(task => outputLines.push(task.text));
+                lastGeneratedTaskText = outputLines.join("\n").trim();
+                lastDateShort = dateData.shortDate;
+                dateHeader.textContent = dateData.header;
+                dateNote.textContent = dateData.note;
+
+                if (filteredTodos.length > 0) {
+                    filteredTodos.forEach((task) => {
+                        const item = document.createElement('div');
+                        item.className = 'task-item';
+                        item.draggable = true;
+                        item.addEventListener('dragstart', handleDragStart);
+                        item.addEventListener('dragover', handleDragOver);
+                        item.addEventListener('dragleave', handleDragLeave);
+                        item.addEventListener('drop', handleDrop);
+                        item.addEventListener('dragend', handleDragEnd);
+                        item.innerHTML = `<span class="drag-handle">::</span><p class="text-base font-medium flex-1">${task.text}</p>`;
+                        taskListContainer.appendChild(item);
+                    });
+                    saveButton.disabled = false;
+                    statusMessage.textContent = `${filteredTodos.length} tasks ready.`;
+                } else {
+                    taskListContainer.innerHTML = '<p class="p-4 text-center text-gray-500">No tasks found.</p>';
+                }
+                outputContainer.classList.remove('hidden');
+            } catch (e) {
+                showError(`Error: ${e.message}`);
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                fetchButton.disabled = false;
+            }
+        }
+
+        async function saveTaskToHabitica() {
+            saveButton.disabled = true;
+            statusMessage.textContent = "Saving...";
+            if (taskListContainer.children.length > 0) regenerateTaskTextFromDOM();
+            
+            const payload = { text: `Sorted To-Dos for ${lastDateShort}`, notes: lastGeneratedTaskText, type: 'todo' };
+            const headers = { 
+                "x-api-user": USER_ID, 
+                "x-api-key": API_TOKEN, 
+                "Content-Type": "application/json" 
+            };
+
+            try {
+                const response = await fetch(HABITICA_API_URL, { method: 'POST', headers, body: JSON.stringify(payload) });
+                const result = await response.json();
+                if (!response.ok || !result.success) throw new Error(result.message || "Save Error");
+                saveSuccess.classList.remove('hidden');
+                statusMessage.textContent = "Saved!";
+            } catch (e) {
+                showError(e.message);
+            } finally {
+                saveButton.disabled = false;
+            }
+        }
+
+        function showError(message) {
+            errorMessage.textContent = message;
+            errorDisplay.classList.remove('hidden');
+            fetchButton.disabled = false;
+            loadingIndicator.classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
