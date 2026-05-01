@@ -47,6 +47,7 @@
     <script>
         // --- DATA INJECTION ---
         const API_URL = "https://habitica.com/api/v3/tasks/user";
+        const CLIENT_HEADER = "habitica-todo-sorter/1.0";
         const PREFIX = "Sorted To-Dos for";
         const BAD_CHARS = ['%', '&', '$', '/'];
         const G_DAYS = ['Δευ', 'Τρι', 'Τετ', 'Πεμ', 'Παρ', 'Σαβ', 'Κυρ'];
@@ -142,7 +143,7 @@
             msg.innerText = "Fetching...";
             
             try {
-                const res = await fetch(API_URL, { headers: { "x-api-user": u, "x-api-key": t } });
+                const res = await fetch(API_URL, { headers: { "x-api-user": u, "x-api-key": t, "x-client": CLIENT_HEADER } });
                 const data = await res.json();
                 if(!data.success) throw new Error(data.message);
 
@@ -195,7 +196,7 @@
             try {
                 const res = await fetch(API_URL, {
                     method: 'POST',
-                    headers: { "x-api-user": u, "x-api-key": t, "Content-Type": "application/json" },
+                    headers: { "x-api-user": u, "x-api-key": t, "x-client": CLIENT_HEADER, "Content-Type": "application/json" },
                     body: JSON.stringify({ text: `Sorted To-Dos for ${globalDate}`, notes: globalText, type: 'todo' })
                 });
                 if(res.ok) alert("Saved successfully!");
