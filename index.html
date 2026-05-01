@@ -63,19 +63,59 @@
             if(confirm("Wipe keys?")) { localStorage.clear(); location.reload(); }
         }
 
+        function localStorageAvailable() {
+            try {
+                const testKey = '__habitica_test__';
+                localStorage.setItem(testKey, testKey);
+                localStorage.removeItem(testKey);
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+
         function saveKeys() {
             const u = document.getElementById('uidInput').value.trim();
             const t = document.getElementById('tokenInput').value.trim();
-            if(u && t) {
+            const err = document.getElementById('err');
+            err.classList.add('hidden');
+
+            if(!u || !t) {
+                err.innerText = 'Enter both User ID and API Token before saving.';
+                err.classList.remove('hidden');
+                return;
+            }
+
+            if(!localStorageAvailable()) {
+                err.innerText = 'Local storage is unavailable in this browser. Keys cannot be saved.';
+                err.classList.remove('hidden');
+                return;
+            }
+
+            try {
                 localStorage.setItem('habitica_uid', u);
                 localStorage.setItem('habitica_token', t);
                 hideSetup();
                 location.reload();
+            } catch (e) {
+                err.innerText = 'Unable to save keys: ' + e.message;
+                err.classList.remove('hidden');
             }
         }
 
         window.onload = () => {
-            if(!localStorage.getItem('habitica_uid')) showSetup();
+            if(!localStorageAvailable()) {
+                document.getElementById('err').innerText = 'Local storage is unavailable in this browser. The app cannot save keys.';
+                document.getElementById('err').classList.remove('hidden');
+                showSetup();
+                return;
+            }
+
+            const uid = localStorage.getItem('habitica_uid');
+            const token = localStorage.getItem('habitica_token');
+            if(uid) document.getElementById('uidInput').value = uid;
+            if(token) document.getElementById('tokenInput').value = token;
+            if(!uid || !token) showSetup();
         };
 
         // Date Logic
