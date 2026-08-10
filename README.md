@@ -2,9 +2,9 @@
 
 A vibe-coded utility to automate repetitive Habitica task sorting, using local storage to ensure your API credentials stay private on your machine while providing a zero-footprint daily summary.
 
-## Live Tool
+[![Donate via Revolut](https://img.shields.io/badge/Donate-Revolut-FFFFFF?style=for-the-badge&logo=revolut&logoColor=white)](https://revolut.me/leonampa) [![License: MIT](https://img.shields.io/badge/License-MIT-238636?style=for-the-badge)](LICENSE)
 
-[**Access the Sorter Here**](https://leonampa.github.io/habitica-todo-sorter/)
+## Live Tool: [**Access the Sorter Here**](https://leonampa.github.io/habitica-todo-sorter/)
 
 ## Technical Sorting Logic
 
